@@ -1,34 +1,27 @@
-name: compose-lab
+name: meeting-service
 
 services:
+  api:
+    image: meeting-api:v1
+    env_file:
+      - .env
+    environment:
+      SERVICE_HOST: 0.0.0.0
+      SERVICE_PORT: "8000"
+    expose:
+      - "8000"
+    networks:
+      - service
+
   web:
-    image: nginx:1.30.8-alpine
+    image: meeting-web:v1
+    environment:
+      API_UPSTREAM: http://api:8000
     ports:
-      - "127.0.0.1:8082:80"
-    volumes:
-      - ./site:/usr/share/nginx/html:ro
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      files:
-        condition: service_started
+      - "127.0.0.1:8080:8080"
+    networks:
+      - service
 
-  files:
-    image: python:3.12-slim
-    command:
-      - sh
-      - -c
-      - mkdir -p /data && exec python -m http.server 8000 --directory /data
-    volumes:
-      - lab-data:/data
-
-  writer:
-    image: python:3.12-slim
-    command:
-      - python
-      - -c
-      - "from pathlib import Path; path = Path('/data/memo.txt'); path.write_text('memo from writer', encoding='utf-8'); print(path.read_text(encoding='utf-8'))"
-    volumes:
-      - lab-data:/data
-
-volumes:
-  lab-data:
+networks:
+  service:
+    driver: bridge
