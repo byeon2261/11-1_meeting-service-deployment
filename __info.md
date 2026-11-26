@@ -128,3 +128,81 @@ networks:
   service:
     driver: bridge
 ```
+
+### 빌드와 실행 관리 조건의 추가
+
+앞의 구성은 **이미 만들어 둔 이미지로 기존 서비스를 실행하는 단계**였다. 이제 같은 `compose.yaml`에 이미지를 다시 만드는 방법과 API의 준비를 기다리는 조건을 더한다. API와 함께 실행되는 MCP 프로세스의 종료 처리, 프로그램이 예기치 않게 끝났을 때의 재시작 정책도 이 파일에 기록한다.
+
+**첫 구성의 이미지·환경변수·포트·네트워크는 유지하고, 반복해서 빌드하고 실행할 때 필요한 관리 조건을 추가한다.** 아래 전체 내용으로 같은 파일을 수정한다.
+
+
+```yaml
+name: meeting-service
+
+services:
+  api:
+    image: meeting-api:v1
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - .env
+    environment:
+      SERVICE_HOST: 0.0.0.0
+      SERVICE_PORT: "8000"
+    expose:
+      - "8000"
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import json; from urllib.request import urlopen; response = urlopen('http://127.0.0.1:8000/api/health', timeout=3); assert json.load(response)['status'] == 'ok'"
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    networks:
+      - service
+
+  web:
+    image: meeting-web:v2
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    environment:
+      API_UPSTREAM: http://api:8000
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - service
+
+networks:
+  service:
+    driver: bridge 
+```
+
+## 컨테이너 교체와 외부 데이터의 수명
+
+저장된 문의를 하나 확인한 뒤 이 프로젝트의 컨테이너와 네트워크를 제거하고, 같은 최종 구성으로 다시 시작한다.
+
+```bash
+docker compose down
+docker compose up -d --wait
+docker compose ps
+```
+
+같은 계정으로 로그인해 앞서 확인한 문의와 저장된 내역을 다시 읽는다. 계정·문의·예약은 외부 Supabase Auth·DB에서 관리하므로 Compose 컨테이너를 교체한 뒤에도 이어진다.
+
+| 대상 | 현재 위치와 관리 판단 |
+| --- | --- |
+| API 코드·패키지·React 운영 파일·Nginx 템플릿 | 이미지. 소스·의존성·복사할 파일이 바뀌면 이미지를 빌드하고 컨테이너 교체 |
+| API 환경변수·웹 중계 주소 | 컨테이너 생성 시 적용. 설정 변경 뒤 해당 서비스 재생성 |
+| 계정·문의·일정·확정 예약 | 외부 Supabase Auth·DB. 컨테이너 수명과 별도로 보관·접근 권한·백업 관리 |
+| API와 MCP가 조사 중 공유하는 원본 파일 | 해당 조사를 위한 임시 파일. 영구 예약 저장소와 구별 |
